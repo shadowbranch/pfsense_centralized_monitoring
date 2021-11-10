@@ -1,0 +1,136 @@
+<?php
+/*
+ * PFsense Centralized Monitoring
+ * Checkin Script
+ * Daniel Moree <Shadowbranch@gmail.com>
+ */
+
+/* Primary Variables */
+$checkinUrl = "https://MYWEBSITE/poster/postPfsense.php"; // URL to the poster
+$updateUrl = "https://MYWEBSITE/poster/checkin.php-latest"; // URL to the latest checkin script
+$selfLoc = "/usr/local/bin/checkin.php";
+$key = "1234567890abcdefghijklmnopqrstuv"; // 32 character randomized key, secures posting to the pfsense DB
+$configFile = "/cf/conf/config.xml";
+$lastUpdate = "/usr/local/bin/checkin-lastupdate";
+
+/* Make sure we update configs so we keep working */
+if(!is_file($lastUpdate) || md5_file($selfLoc) != file_get_contents($lastUpdate)){
+    file_put_contents($lastUpdate, md5_file($selfLoc));
+    modifyConfig($configFile, $selfLoc);
+}
+
+/* Heartbeat */
+$heartbeat = heartBeat($checkinUrl, $key);
+
+/* if it's about 12pm backup the config */
+if(intval(date('H')) == 12 && (intval(date('m')) > 58 || intval(date('m')) < 2))
+    backupConfig($checkinUrl, $key, $configFile);
+
+/* Check for new version and download it if new */
+checkForUpdate($heartbeat, $selfLoc, $updateUrl);
+
+/*
+ * Perform heartbeat
+ */
+function heartBeat($checkinUrl, $key){
+    global $configFile;
+
+    /* Collect system information */
+    $id = file_get_contents('/var/db/uniqueid');
+    $version = file_get_contents('/etc/version');
+    $versiondate = file_get_contents('/etc/version.buildtime');
+    $host = gethostname();
+
+    $config = new SimpleXMLElement(file_get_contents($configFile));
+    $wanip = (string)$config->interfaces->wan->ipaddr;
+    if(strtolower($wanip) == "dhcp"){
+        $temp = file_get_contents('/var/db/wan_ip');
+        if(strlen($temp) > 0)
+            $wanip = $temp;
+    }
+
+    /* Create Curl POST query */
+    $data = array('id'=>$id,'wanip'=>$wanip,'version'=>$version,'versiondate'=>$versiondate,'host'=>$host,'key'=>$key);
+    $data = http_build_query($data, '', '&');
+
+    /* Send Curl POST query */
+    $curl = curl_init($checkinUrl) or die("Error 1");
+    curl_setopt($curl, CURLOPT_POST, 1);
+    curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+    $return = curl_exec($curl) or die(curl_error($curl));
+    curl_close($curl);
+
+    return($return);
+}
+
+/*
+ * Backup config if it's ~12pm
+ */
+function backupConfig($checkinUrl, $key, $configFile){
+    /* Collect system information */
+    $id = file_get_contents('/var/db/uniqueid');
+    $configBase64 = base64_encode(file_get_contents($configFile));
+
+    /* Create Curl POST query */
+    $data = array('id'=>$id,'key'=>$key,'config'=>$configBase64);
+    $data = http_build_query($data, '', '&');
+
+    /* Send Curl POST query */
+    $curl = curl_init($checkinUrl) or die("Error 1");
+    curl_setopt($curl, CURLOPT_POST, 1);
+    curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+    $return = curl_exec($curl) or die(curl_error($curl));
+    curl_close($curl);
+}
+
+/*
+ * Modify Config file with needed jobs, aliases, rules
+ */
+function modifyConfig($configFile, $selfLoc){
+    $updateConfig = false;
+    $updateCron = true;
+    $config = new SimpleXMLElement(file_get_contents($configFile));
+
+    /* Check for Cron job */
+    foreach($config->cron->item as $item){
+        if($item->command == "/usr/local/bin/php ".$selfLoc)
+            $updateCron = false;
+    }
+    /* Add cron job */
+    if($updateCron){
+        $cron = $config->cron->addChild("item");
+        $cron->addChild("minute","*/5");
+        $cron->addChild("hour", "*");
+        $cron->addChild("mday", "*");
+        $cron->addChild("month", "*");
+        $cron->addChild("wday", "*");
+        $cron->addChild("who", "root");
+        $cron->addChild("command", "/usr/local/bin/php /usr/local/bin/checkin.php");
+        $updateConfig = true;
+    }
+
+    /* If any updates done save them */
+    if($updateConfig){
+        $config->asXML($configFile);
+        shell_exec("rm /tmp/config.cache");
+        shell_exec("/etc/rc.reload_all start");
+    }
+    echo "Configuration Updated";
+}
+
+
+/*
+ * Check ourselves against the latest file checksum and update if needed
+ */
+function checkForUpdate($checksum, $selfLoc, $updateUrl){
+    $self_checksum = md5_file($selfLoc);
+    if($self_checksum != $checksum){
+        file_put_contents("/tmp/checkin.php", file_get_contents($updateUrl));
+        if(md5_file("/tmp/checkin.php") == $checksum)
+            rename("/tmp/checkin.php", $selfLoc);
+    }
+}
