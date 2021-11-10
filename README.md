@@ -25,6 +25,7 @@ All of these modifications go in the modifyConfig function in the /poster/checki
 
 **Alias IPs for easy Rule use**
 ```
+$updateAliases = true;
 /* Check for aliases */
 foreach($config->aliases->alias as $alias){
     if($alias->descr == "Remote Authorized IPs")
@@ -38,19 +39,20 @@ if($updateAliases){
     $alias->addChild("address", "12.34.56.78 23.45.67.89");
     $alias->addChild("descr", "Remote Authorized IPs");
     $updateConfig = true;
- }
- ```
+}
+```
  
- **Use Aliased IPs**
- If you use a port that is not 443, you'll need to update the ports here as well as in the /index.php file to match your remote access port.
- ```
+**Use Aliased IPs**
+If you use a port that is not 443, you'll need to update the ports here as well as in the /index.php file to match your remote access port.
+```
+$updateRemoteRules = true;
 /* Check for rules, will not assign remote access rule if a 443 rule already exists */
 foreach($config->filter->rule as $rule){
     if($rule->descr == "Remote Admin Access" || $rule->destination->port == "443")
-        $updateRules = false;
+        $updateRemoteRules = false;
 }
 /* Add outside access rules for alias */
-if($updateRules){
+if($updateRemoteRules){
     $rule = $config->filter->addChild("rule");
     $rule->addChild("type", "pass");
     $rule->addChild("interface", "wan");
