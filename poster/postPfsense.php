@@ -14,14 +14,22 @@ if($_POST['key'] == "1234567890abcdefghijklmnopqrstuv"){
     $hostname = $_POST['host'];
     $version = $_POST['version'];
     $versiondate = $_POST['versiondate'];
+    if(isset($_POST['config']))
+        $config = $_POST['config'];
 
     $result = mysql_query("select ip from pfsense_firewalls where id='$id'", $dbConn) or die();
     $row = mysql_fetch_assoc($result);
 
     if($row['ip'] == '')
-        mysql_query("insert into pfsense_firewalls(id, ip, hostname, version, versiondate, last_checkin) values ('$id', '$wanip', '$hostname', '$version', '$versiondate', '".time()."')", $dbConn);
+        if(isset($config))
+            mysql_query("insert into pfsense_firewalls(id, ip, hostname, version, versiondate, last_checkin, config) values ('$id', '$wanip', '$hostname', '$version', '$versiondate', '".time()."', '$config')", $dbConn);
+        else
+            mysql_query("insert into pfsense_firewalls(id, ip, hostname, version, versiondate, last_checkin) values ('$id', '$wanip', '$hostname', '$version', '$versiondate', '".time()."')", $dbConn);
     else
-        mysql_query("update pfsense_firewalls set ip='$wanip', hostname='$hostname', version='$version', versiondate='$versiondate', last_checkin='".time()."' where id='$id'", $dbConn);
+        if(isset($config))
+            mysql_query("update pfsense_firewalls set ip='$wanip', hostname='$hostname', version='$version', versiondate='$versiondate', last_checkin='".time()."', config='$config' where id='$id'", $dbConn);
+        else
+            mysql_query("update pfsense_firewalls set ip='$wanip', hostname='$hostname', version='$version', versiondate='$versiondate', last_checkin='".time()."' where id='$id'", $dbConn);
 
     $checksum = md5_file("checkin.php-latest");
     echo($checksum);
